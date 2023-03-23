@@ -4,9 +4,9 @@ import pandas as pd
 from cytoolz import compose
 from numbers import Integral
 
+from sklearn.base import BaseEstimator
 from sklearn.preprocessing import LabelBinarizer
 from sklearn.utils.validation import check_is_fitted
-from sklearn.base import BaseEstimator, TransformerMixin
 
 from epic.pandas.numpy import isnan
 from epic.common.general import to_list
