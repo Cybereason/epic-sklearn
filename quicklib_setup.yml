@@ -1,0 +1,36 @@
+setup:
+  name: epic-sklearn
+  description: An expansion pack for scikit-learn
+  long_description:
+    filename: README.md
+    content_type: text/markdown
+  author: Assaf Ben-David, Yonatan Perry, Uri Sternfeld
+  license: MIT License
+  url: https://github.com/Cybereason/epic-sklearn
+
+  python_requires: ">=3.10"
+  top_packages:
+    - epic
+  version_module_paths:
+    - epic/sklearn
+  install_requires:
+    - numpy>=1.21.5
+    - pandas>=1.4.4
+    - scipy>=1.7.3
+    - scikit-learn>=1.1.1
+    - cytoolz
+    - matplotlib
+    - joblib
+    - ultima
+    - epic-logging
+    - epic-common
+    - epic-pandas
+
+  classifiers:
+    - "Development Status :: 4 - Beta"
+    - "Intended Audience :: Developers"
+    - "Operating System :: POSIX :: Linux"
+    - "Operating System :: MacOS :: MacOS X"
+    - "Operating System :: Microsoft :: Windows"
+    - "Programming Language :: Python :: 3 :: Only"
+    - "Programming Language :: Python :: 3.10"
