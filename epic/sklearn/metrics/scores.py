@@ -111,7 +111,7 @@ def confusion_score(
     })
     if len(labels) != len(y_true):
         raise ValueError("Index mismatch for `y_true`, `y_pred` and `sample_weight`.")
-    confusion = labels.groupby(('y_true', 'y_pred'))['weight'].sum().unstack(fill_value=0)
+    confusion = labels.groupby(['y_true', 'y_pred'])['weight'].sum().unstack(fill_value=0)
     if isinstance(price, pd.DataFrame):
         price = price.reindex(index=confusion.index, columns=confusion.columns, copy=False, fill_value=0)
     elif price is None:
