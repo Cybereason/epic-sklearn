@@ -2,9 +2,11 @@ import numpy as np
 import pandas as pd
 
 from numpy.typing import ArrayLike
-from epic.common.general import coalesce
 from sklearn.utils import check_consistent_length
 from sklearn.metrics import precision_recall_curve, precision_recall_fscore_support
+
+from epic.common.general import coalesce
+from epic.pandas.utils import canonize_df_and_cols
 
 
 def recall_given_precision_score(
@@ -112,28 +114,68 @@ def confusion_score(
     if len(labels) != len(y_true):
         raise ValueError("Index mismatch for `y_true`, `y_pred` and `sample_weight`.")
     confusion = labels.groupby(['y_true', 'y_pred'])['weight'].sum().unstack(fill_value=0)
+    price, classprobs = _prepare_price_and_classprobs(
+        price, classprobs, confusion.index.sort_values(), confusion.columns.sort_values(),
+    )
+    support = confusion.sum(axis=1)
+    return (confusion * price).mul(classprobs / support, axis=0).fillna(0).values.sum()
+
+
+def confusion_score_diff(
+        arg, /, *args,
+        price: ArrayLike | pd.DataFrame | None = None,
+        classprobs: ArrayLike | pd.Series | None = None,
+) -> float:
+    # TODO: add docstring
+    df, *cols = canonize_df_and_cols(arg, *args)
+    if isinstance(arg, pd.DataFrame):
+        df = df[list(cols)].copy()
+    if len(cols) == 3:
+        y_true, y_pred1, y_pred2 = cols
+        sample_weight = 'sample_weight'
+        while sample_weight in df.columns:
+            sample_weight += '_'
+        df[sample_weight] = 1
+    else:
+        y_true, y_pred1, y_pred2, sample_weight = cols
+    labeled = df[y_true].notna()
+    price, classprobs = _prepare_price_and_classprobs(
+        price, classprobs, sorted(df.loc[labeled, y_true].unique()), np.unique(df[[y_pred1, y_pred2]]),
+    )
+    prob_support_ratio = classprobs / df.loc[labeled].groupby(y_true)[sample_weight].sum()
+    delta = 'delta'
+    while delta in df.columns:
+        delta += '_'
+    df[delta] = df.loc[labeled].apply(lambda x: np.diff(price.loc[x[y_true], x[[y_pred1, y_pred2]]])[0], axis=1)
+    avg_delta = df.loc[labeled].groupby([y_pred1, y_pred2]).apply(
+        lambda x: (
+            x[[delta, sample_weight]].prod(axis=1).mul(x[y_true].map(prob_support_ratio)).sum() /
+            x[sample_weight].sum()
+        ),
+    )
+    cmat = df.loc[~labeled].groupby([y_pred1, y_pred2])[sample_weight].sum()
+    return cmat.mul(avg_delta).fillna(0).sum()
+
+
+def _prepare_price_and_classprobs(
+        price: ArrayLike | pd.DataFrame | None,
+        classprobs: ArrayLike | pd.Series | None,
+        true_classes: ArrayLike,
+        pred_classes: ArrayLike,
+) -> tuple[pd.DataFrame, pd.Series]:
     if isinstance(price, pd.DataFrame):
-        price = price.reindex(index=confusion.index, columns=confusion.columns, copy=False, fill_value=0)
+        price = price.reindex(index=true_classes, columns=pred_classes, copy=False, fill_value=0)
     elif price is None:
-        price = pd.DataFrame(
-            data=np.full_like(confusion, -1),
-            index=confusion.index.sort_values(),
-            columns=confusion.columns.sort_values(),
-        )
+        price = pd.DataFrame(-1, index=true_classes, columns=pred_classes)
         diag = price.index.intersection(price.columns)
         price.values[price.index.get_indexer(diag), price.columns.get_indexer(diag)] = 1
     else:
-        price = pd.DataFrame(
-            data=price,
-            index=confusion.index.sort_values(),
-            columns=confusion.columns.sort_values(),
-        ).fillna(0)
+        price = pd.DataFrame(price, index=true_classes, columns=pred_classes).fillna(0)
     if isinstance(classprobs, pd.Series):
-        classprobs = classprobs.reindex(index=confusion.index, copy=False, fill_value=0)
+        classprobs = classprobs.reindex(index=true_classes, copy=False, fill_value=0)
     else:
-        classprobs = pd.Series(coalesce(classprobs, 1), index=confusion.index.sort_values()).fillna(0)
-    support = confusion.sum(axis=1)
-    return (confusion * price).mul(classprobs / support, axis=0).fillna(0).values.sum() / classprobs.sum()
+        classprobs = pd.Series(coalesce(classprobs, 1), index=true_classes).fillna(0)
+    return price, classprobs / classprobs.sum()
 
 
 def recall_over_precision_goal_score(
