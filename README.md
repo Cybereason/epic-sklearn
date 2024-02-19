@@ -7,10 +7,10 @@ It provides additional components and utilities, which can make working within t
 framework even more convenient and productive.
 
 The main difference in base-assumptions between scikit-learn and epic-sklearn is that epic-sklearn
-has pandas as a dependency. Moreover, most epic-sklearn components support pandas objects (DataFrame
-and Series) and "pass along" as much information as possible. For example, in most transformers,
-if the features matrix is provided as a DataFrame, the transformed matrix will also be a DataFrame,
-and the index (and columns, if applicable) will be preserved. There are also a few components specifically
+has pandas as a dependency. Moreover, most epic-sklearn components support pandas objects (`DataFrame`
+and `Series`) and "pass along" as much information as possible. For example, in most transformers,
+if the features matrix is provided as a `DataFrame`, the transformed matrix will also be a `DataFrame`,
+and the `index` (and `columns`, if applicable) will be preserved. There are also a few components specifically
 designed for working only with pandas objects.
 
 
@@ -19,7 +19,10 @@ designed for working only with pandas objects.
 - **feature_selection:**
   - **mutual_info:** Calculation of conditional mutual information between a feature and the target given another 
   feature, and feature selection algorithms based on conditional mutual information.
-- **metrics:** Metrics and scores for evaluating classification results and other data sets.
+- **metrics:**
+  - Metrics and scores for evaluating classification results and other data sets.
+  - Also includes the **leven** module, allowing parallel computation of pairwise Levenshtein distances 
+  between python strings.
 - **neighbors:** Utilities relevant for nearest neighbors algorithms.
 - **pipeline:** Transformers for constructing transformation pipelines.
   - Contains a transformer that splits
