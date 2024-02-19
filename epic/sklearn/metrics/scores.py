@@ -1,10 +1,12 @@
 import numpy as np
 import pandas as pd
 
+from typing import Literal
 from numpy.typing import ArrayLike
-from epic.common.general import coalesce
 from sklearn.utils import check_consistent_length
 from sklearn.metrics import precision_recall_curve, precision_recall_fscore_support
+
+from epic.common.general import coalesce
 
 
 def recall_given_precision_score(
@@ -144,6 +146,7 @@ def recall_over_precision_goal_score(
         *,
         pos_label: int | str = 1,
         sample_weight: ArrayLike | None = None,
+        zero_division: Literal["warn", 0, 1] = "warn",
 ) -> float:
     r"""
     Calculate a recall-based score for a specific label, in a scenario where
@@ -152,7 +155,7 @@ def recall_over_precision_goal_score(
      
     The score is calculated as:
     
-    .. math:: score = r * exp(k * min(p - p_g, 0)))
+    .. math:: score = r * exp(k * min(p - p_g, 0))
 
     where
         - r is the recall on the positive label,
@@ -180,6 +183,10 @@ def recall_over_precision_goal_score(
 
     sample_weight : array-like, optional
         Sample weights.
+
+    zero_division : "warn", 0 or 1, default "warn"
+        The value used for recall (precision) when there are no positive labels (predictions).
+        If set to "warn", this acts as 0, but an `UndefinedMetricWarning` is also raised.
 
     Returns
     -------
@@ -213,7 +220,7 @@ def recall_over_precision_goal_score(
     if not 0 <= precision_goal <= 1:
         raise ValueError(f"Invalid `exp_precision`: {precision_goal}")
     [precision], [recall], _, _ = precision_recall_fscore_support(
-        y_true, y_pred, labels=[pos_label], sample_weight=sample_weight,
+        y_true, y_pred, labels=[pos_label], sample_weight=sample_weight, zero_division=zero_division,
     )
     return np.exp(coeff * min(precision - precision_goal, 0)) * recall
 

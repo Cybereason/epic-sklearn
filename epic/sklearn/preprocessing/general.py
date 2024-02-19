@@ -477,7 +477,7 @@ class PipelineLogger(SimpleTransformer):
 class ParallelFunctionTransformer(BaseEstimator, TransformerMixin):
     """
     A transformer similar to `sklearn.preprocessing.FunctionTransformer`.
-    If maps a function over an iterable input, but does it in parallel.
+    It maps a function over an iterable input, but does it in parallel.
 
     Parameters
     ----------
