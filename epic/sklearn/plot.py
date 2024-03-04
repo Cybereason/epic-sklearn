@@ -2,11 +2,13 @@ import numpy as np
 import pandas as pd
 
 from typing import Literal
+from itertools import islice
 from numpy.typing import ArrayLike
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping, Hashable
 
 from matplotlib.axes import Axes
 from matplotlib import pyplot as plt
+from matplotlib.patches import Patch
 from matplotlib.colors import Colormap
 
 from sklearn.utils import check_X_y, check_random_state
@@ -318,3 +320,128 @@ def plot_precision_recall_vs_threshold(
                 ax.plot(*data[ind], 'go')
                 break
     return ax
+
+
+def plot_3d_confusion_matrix(
+        arg, /, *args,
+        row_classes: Iterable[Hashable] | None = None,
+        col_classes: Iterable[Hashable] | None = None,
+        pie_classes: Iterable[Hashable] | None = None,
+        colors: str | Iterable[ColorSpec] | pd.Series | Mapping[Hashable, ColorSpec] | None = None,
+        title: str | None = None,
+        fontsize: float | Literal['xx-small', 'x-small', 'small', 'medium', 'large', 'x-large', 'xx-large'] = 'large',
+) -> None:
+    """
+    Plot a 3D confusion matrix, as a grid of pie charts.
+
+    Provides a simple visualization for the distribution of all possible combinations of
+    three discrete data sets. For example, when attempting to compare between two classifiers,
+    we often find ourselves with the ground truth labels, `y_true`, as well as the prediction
+    made by each classifier, `y_pred1` and `y_pred2`. This plot allows us to inspect the two
+    classification results together, vs. the true labels.
+
+    Each of the plotted grid cells refers to a combination of two classes: a "row class" and
+    a "column class". The cell contains a pie chart showing the distribution of the "pie classes"
+    for the relevant subset of the data. In addition, overlaid on top of the pie is the number
+    of samples included in this cell. Without the pie charts, these numbers would exactly be the
+    confusion matrix between the "rows" and "columns" data sets.
+
+    In the example above, we would compare the two classifiers by designating `y_pred1` and
+    `y_pred2` as the row and column labels, and `y_true` as the pie labels.
+
+    Parameters
+    ----------
+    arg, *args:
+        Positional-only parameters.
+        Either:
+            dataframe : DataFrame
+                Input frame.
+
+            row_labels_column_name, col_labels_column_name, pie_labels_column_name : hashable
+                Column names for row_labels, col_labels and pie_labels.
+
+        or:
+            row_labels, col_labels, pie_labels : array-like
+                The labels themselves.
+
+    row_classes, col_classes, pie_classes : iterable, optional
+        The possible classes to consider for each data set.
+        Other values are discarded.
+        If not provided, values are deduced from the data.
+        If provided, the order of the values is kept.
+
+    colors : str, iterable, Series or mapping, optional
+        The colors to use for the pie charts.
+        - str: The name of a colormap.
+        - iterable: Color specs will be assigned in order.
+                    Must contain at least as many color specs as the number of pie classes.
+        - Series or mapping: Maps pie classes to color specs.
+        - If not provided, the default Matplotlib color cycle is used.
+
+    title : str, optional
+        Title for the plot.
+
+    fontsize : float or str, default 'large'
+        Size of the font to use for all text elements.
+
+    Returns
+    -------
+    None.
+    """
+    df, row_labels, col_labels, pie_labels = canonize_df_and_cols(arg, *args)
+    counts = df.value_counts([row_labels, col_labels, pie_labels], sort=False)
+    row_classes, col_classes, pie_classes = [
+        vals if c is None else list(c) for c, vals in zip((row_classes, col_classes, pie_classes), counts.index.levels)
+    ]
+    counts = counts.unstack(fill_value=0).reindex(columns=pie_classes, fill_value=0, copy=False)
+    if isinstance(colors, pd.Series):
+        colors = colors.to_dict()
+    n_colors = len(pie_classes)
+    if colors is None:
+        colors = [x['color'] for x in islice(plt.rcParams['axes.prop_cycle'](), n_colors)]
+    elif isinstance(colors, str):
+        colors = list(plt.get_cmap(colors, n_colors)(range(n_colors)))
+    elif isinstance(colors, Mapping):
+        if missing := set(pie_classes).difference(colors):
+            raise ValueError(f"missing color values for {missing}")
+    else:
+        colors = list(islice(colors, n_colors))
+        if len(colors) < n_colors:
+            raise ValueError(f"expected at least {n_colors} colors; got only {len(colors)}")
+    colors = pd.Series(colors, index=pie_classes)
+    fig, ax = plt.subplots(len(row_classes), len(col_classes), squeeze=False, subplot_kw={'aspect': 'equal'})
+    fig.subplots_adjust(wspace=0, hspace=0)
+    for i, r in enumerate(row_classes):
+        for j, c in enumerate(col_classes):
+            if (r, c) in counts.index:
+                counts.loc[(r, c)].plot.pie(
+                    label='', counterclock=False, startangle=90, ax=ax[i, j], labels=None, colors=colors,
+                )
+                ax[i, j].text(
+                    0, 0, str(counts.loc[(r, c)].sum()), size=fontsize, weight='bold', ha='center', va='center',
+                )
+                x, y = -2, 0
+            else:
+                ax[i, j].axis('off')
+                x, y = -0.3, 0.5
+            if j == 0:
+                ax[i, 0].text(x, y, r, size=fontsize, ha='right', va='center')
+            if i == 0:
+                ax[0, j].set_title(c, size=fontsize)
+    if title:
+        fig.suptitle(title, fontsize=fontsize)
+        xlabel_kw = {}  # Horizontal label at the bottom
+    else:
+        # Horizontal label at the top
+        xlabel_kw = dict(y=0.99, va='top')
+    fig.supylabel(row_labels, fontsize=fontsize)
+    fig.supxlabel(col_labels, fontsize=fontsize, **xlabel_kw)
+    fig.legend(
+        handles=[Patch(color=x) for x in colors],
+        labels=colors.index.to_list(),
+        loc='upper left',
+        bbox_to_anchor=(1, 1),
+        fontsize=fontsize,
+        frameon=True,
+        title=pie_labels,
+    )
