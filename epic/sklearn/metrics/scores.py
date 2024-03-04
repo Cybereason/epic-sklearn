@@ -114,19 +114,92 @@ def confusion_score(
     if len(labels) != len(y_true):
         raise ValueError("Index mismatch for `y_true`, `y_pred` and `sample_weight`.")
     confusion = labels.groupby(['y_true', 'y_pred'])['weight'].sum().unstack(fill_value=0)
-    price, classprobs = _prepare_price_and_classprobs(
-        price, classprobs, confusion.index.sort_values(), confusion.columns.sort_values(),
-    )
+    price = _prepare_price(price, confusion.index.sort_values(), confusion.columns.sort_values())
+    if isinstance(classprobs, pd.Series):
+        classprobs = classprobs.reindex(index=price.index, copy=False, fill_value=0)
+    else:
+        classprobs = pd.Series(coalesce(classprobs, 1), index=price.index).fillna(0)
     support = confusion.sum(axis=1)
-    return (confusion * price).mul(classprobs / support, axis=0).fillna(0).values.sum()
+    return (confusion * price).mul(classprobs / support, axis=0).fillna(0).values.sum() / classprobs.sum()
 
 
 def confusion_score_diff(
         arg, /, *args,
         price: ArrayLike | pd.DataFrame | None = None,
-        classprobs: ArrayLike | pd.Series | None = None,
 ) -> float:
-    # TODO: add docstring
+    """
+    Estimate the difference in confusion scores between two sets of predictions and the ground truth.
+
+    The setting is as follows: We have two classifiers we would like to compare, but only a small fraction
+    of the samples are labeled. Because we lack enough labeled samples, we can't compute the full confusion
+    score for each classifier and take the difference. However, we can generate predictions for all the
+    samples using the two classifiers.
+
+    In order to estimate the difference in confusion scores, for each pair of predictions (one for each of
+    the two classifiers), we assume that the distribution of true labels is a good enough proxy for the
+    distribution of true labels on all samples (with those two predictions). We can then use this distribution
+    to estimate the difference in scores on all the data.
+
+    Note that any samples for which the two predictions are equal contribute nothing to the difference.
+    (Similarly, the values on the diagonal of the price matrix are never used.) Therefore, it is not necessary
+    to provide any ground truth labels for these samples. In fact, such samples can be excluded entirely.
+
+    The data can be provided either as a pandas DataFrame or as separate arrays / Series. However, in either
+    case, all array lengths must be equal. For the true labels, the unlabeled samples should be indicated
+    by a value of N/A.
+
+    Parameters
+    ----------
+    arg, *args:
+        Positional-only parameters.
+        Either:
+            dataframe : DataFrame
+                Input frame.
+
+            y_true_column_name : hashable
+                Column name for true labels.
+                Should contain N/A values for unlabeled samples.
+
+            y_pred1_column_name : hashable
+                Column name for the predictions of the first classifier.
+
+            y_pred2_column_name : hashable
+                Column name for the predictions of the second classifier.
+
+            sample_weight_column_name : hashable, optional
+                Column name for the sample weights.
+
+        or:
+            y_true : array-like
+                True labels.
+                Should be the same length as the other data arrays, and contain
+                N/A values for unlabeled samples.
+
+            y_pred1 : array-like
+                Predictions of the first classifier.
+
+            y_pred2 : array-like
+                Predictions of the second classifier.
+
+            sample_weight : array-like, optional
+                Sample weights.
+
+    price : array-like or DataFrame, optional
+        Pricing matrix, with shape (n_classes_in_true, n_classes_in_either_pred).
+        If an array is given, the classes are inferred as those that appear at least once
+        in each data set, in sorted order.
+        If not provided, the pricing matrix has 1 on the diagonal and -1 elsewhere.
+
+    Returns
+    -------
+    float
+        The estimated difference `confusion_score(y_true, y_pred2) - confusion_score(y_true, y_pred1)`,
+        taking into account the price matrix and the sample weights.
+
+    See Also
+    --------
+    confusion_score : The score between two sets of predictions.
+    """
     df, *cols = canonize_df_and_cols(arg, *args)
     if isinstance(arg, pd.DataFrame):
         df = df[list(cols)].copy()
@@ -139,43 +212,31 @@ def confusion_score_diff(
     else:
         y_true, y_pred1, y_pred2, sample_weight = cols
     labeled = df[y_true].notna()
-    price, classprobs = _prepare_price_and_classprobs(
-        price, classprobs, sorted(df.loc[labeled, y_true].unique()), np.unique(df[[y_pred1, y_pred2]]),
-    )
-    prob_support_ratio = classprobs / df.loc[labeled].groupby(y_true)[sample_weight].sum()
+    price = _prepare_price(price, sorted(df.loc[labeled, y_true].unique()), np.unique(df[[y_pred1, y_pred2]]))
     delta = 'delta'
     while delta in df.columns:
         delta += '_'
     df[delta] = df.loc[labeled].apply(lambda x: np.diff(price.loc[x[y_true], x[[y_pred1, y_pred2]]])[0], axis=1)
     avg_delta = df.loc[labeled].groupby([y_pred1, y_pred2]).apply(
-        lambda x: (
-            x[[delta, sample_weight]].prod(axis=1).mul(x[y_true].map(prob_support_ratio)).sum() /
-            x[sample_weight].sum()
-        ),
+        lambda x: x[[delta, sample_weight]].prod(axis=1).sum() / x[sample_weight].sum(),
     )
-    cmat = df.loc[~labeled].groupby([y_pred1, y_pred2])[sample_weight].sum()
-    return cmat.mul(avg_delta).fillna(0).sum()
+    confusion_mat = df.groupby([y_pred1, y_pred2])[sample_weight].sum()
+    return confusion_mat.mul(avg_delta).fillna(0).sum()
 
 
-def _prepare_price_and_classprobs(
+def _prepare_price(
         price: ArrayLike | pd.DataFrame | None,
-        classprobs: ArrayLike | pd.Series | None,
         true_classes: ArrayLike,
         pred_classes: ArrayLike,
-) -> tuple[pd.DataFrame, pd.Series]:
+) -> pd.DataFrame:
     if isinstance(price, pd.DataFrame):
-        price = price.reindex(index=true_classes, columns=pred_classes, copy=False, fill_value=0)
-    elif price is None:
-        price = pd.DataFrame(-1, index=true_classes, columns=pred_classes)
-        diag = price.index.intersection(price.columns)
-        price.values[price.index.get_indexer(diag), price.columns.get_indexer(diag)] = 1
-    else:
-        price = pd.DataFrame(price, index=true_classes, columns=pred_classes).fillna(0)
-    if isinstance(classprobs, pd.Series):
-        classprobs = classprobs.reindex(index=true_classes, copy=False, fill_value=0)
-    else:
-        classprobs = pd.Series(coalesce(classprobs, 1), index=true_classes).fillna(0)
-    return price, classprobs / classprobs.sum()
+        return price.reindex(index=true_classes, columns=pred_classes, copy=False, fill_value=0)
+    elif price is not None:
+        return pd.DataFrame(price, index=true_classes, columns=pred_classes).fillna(0)
+    price = pd.DataFrame(-1, index=true_classes, columns=pred_classes)
+    diag = price.index.intersection(price.columns)
+    price.values[price.index.get_indexer(diag), price.columns.get_indexer(diag)] = 1
+    return price
 
 
 def recall_over_precision_goal_score(
